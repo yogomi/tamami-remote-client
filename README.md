@@ -1,0 +1,2 @@
+# tamami-remote-client
+マイクから音声を取得してOpusでWebRTCに載せて送信するクライアント
