@@ -1,0 +1,30 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[scripts]
+start = "python src/main.py --waveform"
+test = "pytest -s"
+watch = "ptw --config pytest.ini --runner 'pytest --testmon -s'"
+check = "pre-commit run --all-files"
+fix = "sh -c 'ruff check . --fix && black .'"
+
+[packages]
+pyaudio = "*"
+numpy = "*"
+matplotlib = "*"
+flask = "*"
+plotly = "*"
+
+[dev-packages]
+pytest = "*"
+pytest-watch = "*"
+pytest-testmon = "*"
+datasets = "*"
+pre-commit = "*"
+black = "*"
+ruff = "*"
+
+[requires]
+python_version = "3.13"
