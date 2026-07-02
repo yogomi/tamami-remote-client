@@ -3,7 +3,7 @@ __pycache__/
 *$py.class
 
 # testmonが残すファイル
-.testmondata
+.testmondata*
 
 # C extensions
 *.so

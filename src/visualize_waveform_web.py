@@ -5,18 +5,17 @@ Webブラウザでリアルタイム波形を表示する。
 
 起動後 http://localhost:5000 にアクセスすると波形が表示される。
 """
-from typing import Optional
+
 import threading
 import queue
 import numpy as np
-from flask import Flask, render_template, Response
-import plotly.graph_objs as go
+from flask import Flask, Response
 import json
 import time
 
 
 class WaveformVisualizerWeb:
-    """Webブラウザ向けリアルタイム波形可視化クラス. 
+    """Webブラウザ向けリアルタイム波形可視化クラス.
 
     Args:
         sample_rate: サンプリングレート(Hz).
@@ -41,13 +40,13 @@ class WaveformVisualizerWeb:
         self.port = port
         self._buf_len = int(self.sample_rate * self.window_seconds)
         self._buffer = np.zeros(self._buf_len, dtype=np.float32)
-        self._q:  "queue.Queue[np.ndarray]" = queue.Queue()
+        self._q: "queue.Queue[np.ndarray]" = queue.Queue()
         self._running = False
         self._lock = threading.Lock()
         self._app = Flask(__name__)
         self._setup_routes()
 
-    def add_frames(self, frames, dtype:  str = "int16") -> None:
+    def add_frames(self, frames, dtype: str = "int16") -> None:
         """音声フレームをキューへ追加する.
 
         Args:
@@ -60,15 +59,15 @@ class WaveformVisualizerWeb:
             arr = np.asarray(frames)
         if arr.ndim == 1 and self.channels == 2:
             arr = arr.reshape(-1, 2)[:, 0]
-        elif arr.ndim == 2: 
-            arr = arr[: , 0]
-        if np.issubdtype(arr. dtype, np.integer):
+        elif arr.ndim == 2:
+            arr = arr[:, 0]
+        if np.issubdtype(arr.dtype, np.integer):
             maxval = np.iinfo(arr.dtype).max
-            arr = arr. astype(np.float32) / float(maxval)
+            arr = arr.astype(np.float32) / float(maxval)
         else:
             arr = arr.astype(np.float32)
-        if self. decimate > 1:
-            arr = arr[::  self.decimate]
+        if self.decimate > 1:
+            arr = arr[:: self.decimate]
         try:
             self._q.put_nowait(arr)
         except queue.Full:
@@ -80,7 +79,7 @@ class WaveformVisualizerWeb:
                 arr = self._q.get_nowait()
                 n = arr.shape[0]
                 if n >= self._buf_len:
-                    self._buffer[: ] = arr[-self._buf_len :]
+                    self._buffer[:] = arr[-self._buf_len :]
                 else:
                     self._buffer[:-n] = self._buffer[n:]
                     self._buffer[-n:] = arr
@@ -130,24 +129,19 @@ class WaveformVisualizerWeb:
                     self._drain_queue_to_buffer()
                     with self._lock:
                         t = np.linspace(
-                            -self.window_seconds,
-                            0.0,
-                            num=self._buf_len,
-                            endpoint=False
+                            -self.window_seconds, 0.0, num=self._buf_len, endpoint=False
                         )
-                        payload = {
-                            "x":  t. tolist(),
-                            "y": self._buffer.tolist()
-                        }
+                        payload = {"x": t.tolist(), "y": self._buffer.tolist()}
                     yield f"data: {json.dumps(payload)}\n\n"
                     time.sleep(0.05)
+
             return Response(event_stream(), mimetype="text/event-stream")
 
     def start(self, debug: bool = False) -> None:
         """Webサーバーを起動する.
 
         Args:
-            debug:  Flaskのデバッグモード. 
+            debug:  Flaskのデバッグモード.
 
         Note:
             別スレッドで起動するため、メインスレッドはブロックされない。
@@ -157,12 +151,9 @@ class WaveformVisualizerWeb:
         self._running = True
         threading.Thread(
             target=lambda: self._app.run(
-                host="0.0.0.0",
-                port=self.port,
-                debug=debug,
-                use_reloader=False
+                host="0.0.0.0", port=self.port, debug=debug, use_reloader=False
             ),
-            daemon=True
+            daemon=True,
         ).start()
         print(f"Waveform visualizer started at http://localhost:{self.port}")
 
