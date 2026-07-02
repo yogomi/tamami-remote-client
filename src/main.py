@@ -1,5 +1,6 @@
 from typing import Optional
 from types import FrameType
+import asyncio
 import signal
 import argparse
 
@@ -22,6 +23,17 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser = argparse.ArgumentParser(description="tamami-remote-client (with waveform)")
+    parser.add_argument(
+        "--connect",
+        type=str,
+        default=None,
+        metavar="URL",
+        help=(
+            "Stream microphone audio to tamami server via WebRTC "
+            "(e.g. ws://localhost:8765/ws). "
+            "Other options are ignored in this mode."
+        ),
+    )
     parser.add_argument("--waveform", action="store_true")
     parser.add_argument("--waveform-port", type=int, default=50000)
     parser.add_argument(
@@ -40,6 +52,13 @@ def main():
         help="Opus bitrate in kbps (default: 64)",
     )
     args = parser.parse_args()
+
+    # Streaming mode: send microphone audio to tamami server via WebRTC
+    if args.connect:
+        from network.client import run_client
+
+        asyncio.run(run_client(args.connect))
+        return
 
     visualizer = None
     if args.waveform:

@@ -16,6 +16,8 @@ numpy = "*"
 matplotlib = "*"
 flask = "*"
 plotly = "*"
+aiortc = "*"
+websockets = "*"
 
 [dev-packages]
 pytest = "*"
