@@ -2,11 +2,12 @@ from typing import Optional
 from types import FrameType
 import signal
 import argparse
-import threading
 
 from visualize_waveform_web import WaveformVisualizerWeb
 
 from audio import MicrophoneInput
+from audio.encoder import OpusFileEncoder
+
 
 def main():
     # Setup signal handler for graceful shutdown
@@ -19,11 +20,25 @@ def main():
 
     signal.signal(signal.SIGINT, signal_handler)
 
-
     parser = argparse.ArgumentParser()
     parser = argparse.ArgumentParser(description="tamami-remote-client (with waveform)")
     parser.add_argument("--waveform", action="store_true")
     parser.add_argument("--waveform-port", type=int, default=50000)
+    parser.add_argument(
+        "--save-audio", action="store_true", help="Save audio input to Opus file"
+    )
+    parser.add_argument(
+        "--output-filename",
+        type=str,
+        default=None,
+        help="Output filename for Opus file",
+    )
+    parser.add_argument(
+        "--opus-bitrate",
+        type=int,
+        default=64,
+        help="Opus bitrate in kbps (default: 64)",
+    )
     args = parser.parse_args()
 
     visualizer = None
@@ -33,9 +48,20 @@ def main():
             channels=1,
             window_seconds=2,
             decimate=4,
-            port=args.waveform_port
+            port=args.waveform_port,
         )
         visualizer.start()
+
+    # Initialize Opus encoder if requested
+    opus_encoder = None
+    if args.save_audio:
+        opus_encoder = OpusFileEncoder(
+            filepath=args.output_filename,
+            sample_rate=16000,
+            channels=1,
+            bitrate=args.opus_bitrate,
+        )
+        print(f"Opus recording enabled.  Output:  {opus_encoder.filepath}")
 
     # # Example sounddevice callback integration
     # def audio_callback(indata, frames, time, status) -> None:
@@ -57,8 +83,16 @@ def main():
                 visualizer.add_frames(chunk.reshape(-1, 1))
             print(f"Read audio chunk of shape: {chunk.shape}")
             print(f"Sample rate: {mic.get_sample_rate()} Hz")
+
+            # Encode and save to Opus if enabled
+            if opus_encoder is not None:
+                opus_encoder.encode(chunk)
+
     finally:
         mic.close()
+        if opus_encoder is not None:
+            opus_encoder.close()
+
 
 if __name__ == "__main__":
     main()
