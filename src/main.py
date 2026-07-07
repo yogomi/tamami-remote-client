@@ -36,9 +36,7 @@ def main():
     )
     parser.add_argument("--waveform", action="store_true")
     parser.add_argument("--waveform-port", type=int, default=50000)
-    parser.add_argument(
-        "--save-audio", action="store_true", help="Save audio input to Opus file"
-    )
+    parser.add_argument("--save-audio", action="store_true", help="Save audio input to Opus file")
     parser.add_argument(
         "--output-filename",
         type=str,

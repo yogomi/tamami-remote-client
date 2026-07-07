@@ -1,4 +1,4 @@
-"""Audio encoding module for Opus format. 
+"""Audio encoding module for Opus format.
 
 This module provides encoding functionality for converting raw PCM audio
 to Opus compressed format using ffmpeg as a subprocess.

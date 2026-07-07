@@ -218,9 +218,7 @@ class StreamingClient:
             elif message_type == "pong":
                 self._rtt_ms = float(now_ms() - message["client_ts_ms"])
             elif message_type == "error":
-                print(
-                    f"\nServer error [{message.get('code')}]: {message.get('message')}"
-                )
+                print(f"\nServer error [{message.get('code')}]: {message.get('message')}")
                 if message.get("fatal"):
                     break
 
