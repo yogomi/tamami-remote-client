@@ -1,3 +1,29 @@
+[project]
+name = "tamami-remote-client"
+version = "0.1.0"
+description = "マイクから音声を取得してOpusでWebRTCに載せて送信するクライアント"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "pyaudio",
+    "numpy",
+    "matplotlib",
+    "flask",
+    "plotly",
+    "aiortc",
+    "websockets",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-watch",
+    "pytest-testmon",
+    "datasets",
+    "pre-commit",
+    "black",
+    "ruff",
+]
+
 [tool.black]
 line-length = 100
 target-version = ['py311']

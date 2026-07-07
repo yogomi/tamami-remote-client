@@ -4,18 +4,20 @@
 
 # セットアップ
 
-## pipenvのインストール
+## uvのインストール
 
-すでにpipenvが入っている場合は飛ばして下さい。
+すでにuvが入っている場合は飛ばして下さい。
 
-pipenvはUbuntuやDebian系のLinuxディストリビューションでは、以下のコマンドで
-インストールできるはずです。
+uvは以下のコマンドでインストールできます。
 
 ```bash
-$ sudo apt update
-$ sudo apt upgrade
-$ sudo apt install python3-pip
-$ pip3 install --user pipenv
+$ curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+macOSではHomebrewでもインストールできます。
+
+```bash
+$ brew install uv
 ```
 
 ## プロジェクトのセットアップ
@@ -26,18 +28,18 @@ gitリポジトリのクローン。
 $ git clone git@github.com:stc-zao-developer/python-project-base.git
 ```
 
-プロジェクトディレクトリに移動して、pipenvで依存関係をインストール。
+プロジェクトディレクトリに移動して、uvで依存関係をインストール
+（dev依存を含めて `.venv` に同期されます）。
 
 ```bash
-$ cd python-project-template
-$ pipenv install --dev
-$ pipenv install
+$ cd tamami-remote-client
+$ uv sync
 ```
 
 pre-commitのセットアップ
 
 ```bash
-$ pipenv run pre-commit install
+$ uv run pre-commit install
 ```
 
 pre-commitをセットアップすることにより、gitのcommit時に自動でコードの静的解析が実行されるように
@@ -49,10 +51,16 @@ pre-commitをセットアップすることにより、gitのcommit時に自動�
 ソースコードはsrcディレクトリ以下に配置されます。
 
 ```bash
-$ pipenv run start
+$ uv run python src/main.py --waveform
 ```
 
 を実行することにより、main.pyが実行されます。
+
+tamamiサーバーへマイク音声をストリーミング送信する場合は `--connect` を指定します。
+
+```bash
+$ uv run python src/main.py --connect ws://localhost:8765/ws
+```
 
 ## テストの実行
 
@@ -60,12 +68,12 @@ $ pipenv run start
 pytestを使って実行します。
 
 ```bash
-$ pipenv run pytest
+$ uv run pytest -s
 ```
 
 また、
 ```bash
-$ pipenv run watch
+$ uv run ptw --config pytest.ini --runner 'pytest --testmon -s'
 ```
 
 を実行することにより、コードの変更を監視し、変更があった場合に自動でテストを実行します。
@@ -76,13 +84,13 @@ $ pipenv run watch
 コードのテストは、pre-commitで自動的に行われまが、手動で実行することもできます。
 
 ```bash
-$ pipenv run check
+$ uv run pre-commit run --all-files
 ```
 
 pre-commitや、checkコマンドで指摘された問題を自動で修正するには
 
 ```bash
-$ pipenv run fix
+$ uv run ruff check . --fix && uv run black .
 ```
 
 を実行します。
