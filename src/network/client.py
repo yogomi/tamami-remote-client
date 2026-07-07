@@ -155,6 +155,12 @@ class StreamingClient:
                 ping_task.cancel()
             if pc is not None:
                 await pc.close()
+            # マイクは「トラック停止 → 実行中の読み取りの完了待ち → close」の順で閉じる。
+            # 読み取り中に別スレッドから閉じると読み取りが戻らず、終了時の
+            # executor スレッドの join が固まるため（drain() の docstring を参照）
+            if self._track is not None:
+                self._track.stop()
+                await self._track.drain()
             await channel.close()
             microphone.close()
             loop.remove_signal_handler(signal.SIGINT)

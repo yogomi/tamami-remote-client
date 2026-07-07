@@ -10,7 +10,7 @@ from fractions import Fraction
 from typing import Optional
 
 import numpy as np
-from aiortc import RTCPeerConnection, RTCRtpSender
+from aiortc import RTCConfiguration, RTCPeerConnection, RTCRtpSender
 from aiortc.mediastreams import MediaStreamError, MediaStreamTrack
 from av.audio.frame import AudioFrame
 
@@ -18,6 +18,10 @@ from audio.input import AudioInputStream
 
 # Opus 標準のフレーム長（PROTOCOL.md「上り: 音声」を参照）
 FRAME_DURATION_SEC = 0.02
+
+# drain() で実行中のマイク読み取りの完了を待つ最大秒数。
+# 1 回の読み取りは高々フレーム数フレーム分（100ms 未満）で返るため、十分な余裕を持たせた値。
+READ_DRAIN_TIMEOUT_SEC = 1.0
 
 
 class MicrophoneStreamTrack(MediaStreamTrack):
@@ -51,6 +55,10 @@ class MicrophoneStreamTrack(MediaStreamTrack):
         self._sample_rate = source.get_sample_rate()
         self._frame_samples = int(self._sample_rate * FRAME_DURATION_SEC)
         self._pts = 0
+        # 実行中の読み取りの有無をスレッド側で記録する（drain() が参照）。
+        # asyncio future はタスクのキャンセルで「完了」扱いになり、executor
+        # スレッド上の実際の読み取り状態を反映しないため、future では追跡しない
+        self._read_active = False
         self.start_ts_ms: Optional[int] = None
 
     async def recv(self) -> AudioFrame:
@@ -67,10 +75,10 @@ class MicrophoneStreamTrack(MediaStreamTrack):
             raise MediaStreamError
 
         loop = asyncio.get_running_loop()
+        # 投入前にフラグを立てる（未開始のジョブも「実行中」として drain() に待たせる）
+        self._read_active = True
         try:
-            pcm_float = await loop.run_in_executor(
-                None, self._source.read_chunk, self._frame_samples
-            )
+            pcm_float = await loop.run_in_executor(None, self._tracked_read)
         except IOError as e:
             self.stop()
             raise MediaStreamError(f"microphone read failed: {e}") from e
@@ -87,11 +95,49 @@ class MicrophoneStreamTrack(MediaStreamTrack):
         self._pts += len(pcm_int16)
         return frame
 
+    def _tracked_read(self) -> np.ndarray:
+        """read_chunk() を実行し、終了時に必ず実行中フラグを下ろす（executor 上で走る）.
+
+        Returns:
+            read_chunk() の戻り値。
+
+        Raises:
+            IOError: read_chunk() が失敗した場合。
+        """
+        try:
+            return self._source.read_chunk(self._frame_samples)
+        finally:
+            self._read_active = False
+
+    async def drain(self) -> None:
+        """実行中のマイク読み取りの完了を待つ.
+
+        PyAudio の読み取り中に別スレッドからストリームを閉じると読み取りが
+        戻らなくなることがあり、インタープリタ終了時の executor スレッドの
+        join が固まる。source.close() の前に必ず呼ぶこと。
+
+        recv() の await がキャンセルされても executor 上の読み取りは走り続ける
+        （このとき asyncio future はキャンセル＝完了扱いになる）ため、実スレッド
+        側のフラグをポーリングして完了を待つ。
+
+        Raises:
+            なし（タイムアウト時は諦めて戻る）。
+        """
+        deadline = time.monotonic() + READ_DRAIN_TIMEOUT_SEC
+        while self._read_active and time.monotonic() < deadline:
+            await asyncio.sleep(0.005)
+
 
 def create_peer_connection(track: MicrophoneStreamTrack) -> RTCPeerConnection:
     """音声トラックを載せた RTCPeerConnection を作る.
 
     PROTOCOL.md に従い、SDP では Opus のみを提示する。
+
+    ICE サーバーは設定しない（LAN 内のホスト候補のみで接続する）。
+    aiortc のデフォルトは Google の STUN サーバーで、aioice がその DNS 解決を
+    タイムアウトなしの executor ジョブとして実行するため、DNS が応答しない
+    環境ではスレッドが残り続けプロセス終了時の join が固まる。
+    NAT 越えが必要になったら、STUN / TURN は IP アドレス指定で設定すること。
 
     Args:
         track: 送出するマイクトラック。
@@ -99,7 +145,7 @@ def create_peer_connection(track: MicrophoneStreamTrack) -> RTCPeerConnection:
     Returns:
         トラック追加・コーデック制限済みの RTCPeerConnection。
     """
-    pc = RTCPeerConnection()
+    pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
     pc.addTrack(track)
     capabilities = RTCRtpSender.getCapabilities("audio")
     opus_codecs = [c for c in capabilities.codecs if c.mimeType.lower() == "audio/opus"]

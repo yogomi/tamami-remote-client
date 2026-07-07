@@ -4,6 +4,8 @@ This module provides abstract and concrete implementations for audio input,
 including microphone input and stream-based input.
 """
 
+import threading
+import time
 from abc import ABC, abstractmethod
 from typing import Callable, Optional
 
@@ -97,6 +99,10 @@ class MicrophoneInput(AudioInputStream):
         self._audio = pyaudio.PyAudio()
         self._stream: Optional[pyaudio.Stream] = None
         self._buffer = np.array([], dtype=np.float32)
+        # 読み取りスレッドと close() の排他。読み取り実行中に別スレッドから
+        # ストリームを閉じると Pa_ReadStream が戻らなくなることがあるため（macOS）
+        self._closing = False
+        self._lock = threading.Lock()
         self._open_stream()
 
     def _open_stream(self) -> None:
@@ -120,6 +126,10 @@ class MicrophoneInput(AudioInputStream):
     def read_chunk(self, chunk_size: int) -> np.ndarray:
         """Read a chunk of audio data from the microphone.
 
+        Reads only frames already captured by PortAudio (non-blocking reads
+        in a polling loop), so this call never blocks indefinitely inside
+        PortAudio and close() can safely interrupt it from another thread.
+
         Args:
             chunk_size: Number of samples to read.
 
@@ -127,7 +137,8 @@ class MicrophoneInput(AudioInputStream):
             Audio data as a numpy array with float32 dtype.
 
         Raises:
-            IOError: If reading from the microphone fails.
+            IOError: If reading from the microphone fails, or if close()
+                was requested while waiting for data.
 
         Examples:
             >>> mic = MicrophoneInput()
@@ -141,12 +152,28 @@ class MicrophoneInput(AudioInputStream):
 
         # Read from stream until we have enough samples
         while len(self._buffer) < chunk_size:
-            try:
-                data = self._stream.read(self.CHUNK_SIZE, exception_on_overflow=False)
-                audio_chunk = np.frombuffer(data, dtype=np.float32)
-                self._buffer = np.concatenate([self._buffer, audio_chunk])
-            except Exception as e:
-                raise IOError(f"Failed to read from microphone: {e}") from e
+            if self._closing:
+                raise IOError("Microphone stream is closing.")
+            with self._lock:
+                if self._closing or self._stream is None:
+                    raise IOError("Microphone stream is closing.")
+                try:
+                    # 取得済みフレームのみ読む（ブロックしない）。ロック保持は
+                    # 数ミリ秒以内に収まり、close() を長時間待たせない
+                    available = self._stream.get_read_available()
+                    if available > 0:
+                        frames = min(available, self.CHUNK_SIZE)
+                        data = self._stream.read(frames, exception_on_overflow=False)
+                    else:
+                        data = None
+                except Exception as e:
+                    raise IOError(f"Failed to read from microphone: {e}") from e
+            if data is None:
+                # フレームが溜まるのを待つ（20ms フレームに対して十分細かい間隔）
+                time.sleep(0.005)
+                continue
+            audio_chunk = np.frombuffer(data, dtype=np.float32)
+            self._buffer = np.concatenate([self._buffer, audio_chunk])
 
         # Extract requested chunk and keep remainder in buffer
         result = self._buffer[:chunk_size]
@@ -164,16 +191,24 @@ class MicrophoneInput(AudioInputStream):
     def close(self) -> None:
         """Close the microphone stream and release resources.
 
+        Safe to call while another thread is inside read_chunk(): the
+        closing flag makes the reader exit its polling loop, and the lock
+        ensures the stream is not torn down during a PortAudio call.
+
         Examples:
             >>> mic = MicrophoneInput()
             >>> mic.close()
         """
-        if self._stream is not None:
-            self._stream.stop_stream()
-            self._stream.close()
-            self._stream = None
-        if self._audio is not None:
-            self._audio.terminate()
+        # 先に終了を通知して読み取りループを抜けさせ、ロック下で閉じる
+        self._closing = True
+        with self._lock:
+            if self._stream is not None:
+                self._stream.stop_stream()
+                self._stream.close()
+                self._stream = None
+            if self._audio is not None:
+                self._audio.terminate()
+                self._audio = None
 
 
 class StreamInput(AudioInputStream):
