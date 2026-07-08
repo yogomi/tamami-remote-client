@@ -1,6 +1,6 @@
 """network.client / network.signaling の純粋関数部分のテスト."""
 
-from network.client import compute_perceived_latency_ms, format_result_line
+from network.client import compute_perceived_latency_ms
 from network.signaling import (
     PROTOCOL_VERSION,
     make_ping,
@@ -22,37 +22,6 @@ class TestComputePerceivedLatencyMs:
     def test_zero_latency(self):
         latency = compute_perceived_latency_ms(3000, 1000, 2.0)
         assert latency == 0.0
-
-
-class TestFormatResultLine:
-    """format_result_line のテスト."""
-
-    def _asr_message(self, is_final: bool) -> dict:
-        return {
-            "type": "asr",
-            "segment_id": 12,
-            "text": "こんにちは",
-            "lang": "ja",
-            "is_final": is_final,
-            "ts_audio_start": 0.0,
-            "ts_audio_end": 2.0,
-        }
-
-    def test_contains_text_and_latency(self):
-        line = format_result_line(self._asr_message(False), 1234.0, None)
-        assert "こんにちは" in line
-        assert "asr#12" in line
-        assert "latency 1.23s" in line
-        assert "rtt" not in line
-
-    def test_final_marker_and_rtt(self):
-        line = format_result_line(self._asr_message(True), 1234.0, 15.6)
-        assert "asr#12*" in line
-        assert "rtt 16ms" in line
-
-    def test_without_latency(self):
-        line = format_result_line(self._asr_message(False), None, None)
-        assert "latency" not in line
 
 
 class TestControlMessages:

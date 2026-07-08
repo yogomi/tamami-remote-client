@@ -1,8 +1,8 @@
 """ストリーミング送信クライアント本体.
 
-マイク音声を WebRTC で tamami サーバーへ送り、認識・翻訳結果をコンソールへ
-表示する。暫定結果（is_final: false）は行を書き換え、確定結果で改行する。
-あわせて体感遅延（PROTOCOL.md「遅延計測」）と RTT を表示する。
+マイク音声を WebRTC で tamami サーバーへ送り、認識・翻訳結果を
+`TranslationOutput` へ渡して表示する。あわせて体感遅延
+（PROTOCOL.md「遅延計測」）と RTT を計算し出力へ渡す。
 """
 
 import asyncio
@@ -25,15 +25,13 @@ from network.webrtc_client import (
     create_offer_sdp,
     create_peer_connection,
 )
+from output import ConsoleOutput, TranslationOutput
 
 # ping の送信間隔（秒）
 PING_INTERVAL_SEC = 5.0
 
 # session_end 送信後にサーバーのフラッシュ結果を待つ最大秒数
 DRAIN_TIMEOUT_SEC = 5.0
-
-# 暫定結果の書き換えで前の行の残骸を消すための最小表示幅
-LINE_MIN_WIDTH = 70
 
 
 def compute_perceived_latency_ms(
@@ -55,50 +53,26 @@ def compute_perceived_latency_ms(
     return received_at_ms - (track_start_ms + ts_audio_end * 1000.0)
 
 
-def format_result_line(
-    message: dict[str, Any],
-    latency_ms: Optional[float],
-    rtt_ms: Optional[float],
-) -> str:
-    """asr / translation メッセージの表示行を組み立てる.
-
-    Args:
-        message: 受信した asr または translation メッセージ。
-        latency_ms: 体感遅延（ミリ秒）。計算できない場合は None。
-        rtt_ms: 直近の ping / pong で得た RTT（ミリ秒）。未計測なら None。
-
-    Returns:
-        コンソール 1 行分の文字列。
-    """
-    kind = message["type"]
-    marker = "*" if message.get("is_final") else " "
-    text = message.get("text", "")
-    parts = [f"[{kind}#{message.get('segment_id')}{marker}] {text}"]
-    if latency_ms is not None:
-        parts.append(f"latency {latency_ms / 1000.0:.2f}s")
-    if rtt_ms is not None:
-        parts.append(f"rtt {rtt_ms:.0f}ms")
-    return " | ".join(parts)
-
-
 class StreamingClient:
     """接続 1 回分のストリーミング送信クライアント.
 
     Args:
         url: 接続先（例: "ws://localhost:8765/ws"）。
+        output: 認識・翻訳結果の表示先。
     """
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, output: TranslationOutput) -> None:
         """クライアントを初期化する.
 
         Args:
             url: 接続先 URL。
+            output: 認識・翻訳結果の表示先。
         """
         self._url = url
+        self._output = output
         self._channel: Optional[SignalingChannel] = None
         self._track: Optional[MicrophoneStreamTrack] = None
         self._rtt_ms: Optional[float] = None
-        self._last_line_width = LINE_MIN_WIDTH
 
     async def run(self) -> None:
         """セッションを実行する（Ctrl+C で終了する）.
@@ -162,6 +136,7 @@ class StreamingClient:
                 self._track.stop()
                 await self._track.drain()
             await channel.close()
+            self._output.close()
             microphone.close()
             loop.remove_signal_handler(signal.SIGINT)
             print("Closed.")
@@ -209,7 +184,7 @@ class StreamingClient:
             await channel.send(make_ping())
 
     async def _receive_loop(self, channel: SignalingChannel) -> None:
-        """結果メッセージを受信して表示する（接続が閉じるまで）.
+        """結果メッセージを受信して出力へ渡す（接続が閉じるまで）.
 
         Args:
             channel: 接続済みの制御チャネル。
@@ -220,35 +195,18 @@ class StreamingClient:
                 break
             message_type = message.get("type")
             if message_type in ("asr", "translation"):
-                self._show_result(message)
+                latency_ms: Optional[float] = None
+                if self._track is not None and self._track.start_ts_ms is not None:
+                    latency_ms = compute_perceived_latency_ms(
+                        now_ms(), self._track.start_ts_ms, message["ts_audio_end"]
+                    )
+                self._output.handle(message, latency_ms, self._rtt_ms)
             elif message_type == "pong":
                 self._rtt_ms = float(now_ms() - message["client_ts_ms"])
             elif message_type == "error":
                 print(f"\nServer error [{message.get('code')}]: {message.get('message')}")
                 if message.get("fatal"):
                     break
-
-    def _show_result(self, message: dict[str, Any]) -> None:
-        """asr / translation を 1 行で表示する.
-
-        暫定結果はキャリッジリターンで行を書き換え、確定結果で改行する
-        （PROTOCOL.md「クライアント実装の指針」）。
-
-        Args:
-            message: 受信した asr または translation メッセージ。
-        """
-        latency_ms: Optional[float] = None
-        if self._track is not None and self._track.start_ts_ms is not None:
-            latency_ms = compute_perceived_latency_ms(
-                now_ms(), self._track.start_ts_ms, message["ts_audio_end"]
-            )
-        line = format_result_line(message, latency_ms, self._rtt_ms)
-        width = max(self._last_line_width, len(line))
-        self._last_line_width = max(LINE_MIN_WIDTH, len(line))
-        if message.get("is_final"):
-            print(f"\r{line.ljust(width)}")
-        else:
-            print(f"\r{line.ljust(width)}", end="", flush=True)
 
 
 async def run_client(url: str) -> None:
@@ -257,5 +215,5 @@ async def run_client(url: str) -> None:
     Args:
         url: 接続先（例: "ws://localhost:8765/ws"）。
     """
-    client = StreamingClient(url)
+    client = StreamingClient(url, ConsoleOutput())
     await client.run()
