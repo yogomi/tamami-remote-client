@@ -10,18 +10,12 @@ from audio import MicrophoneInput
 from audio.encoder import OpusFileEncoder
 
 
-def main():
-    # Setup signal handler for graceful shutdown
-    running = True
+def build_parser() -> argparse.ArgumentParser:
+    """コマンドライン引数のパーサーを構築する.
 
-    def signal_handler(sig: int, frame: Optional[FrameType]) -> None:
-        nonlocal running
-        print("\nShutting down...")
-        running = False
-
-    signal.signal(signal.SIGINT, signal_handler)
-
-    parser = argparse.ArgumentParser()
+    Returns:
+        tamami-remote-client の引数を定義した ArgumentParser。
+    """
     parser = argparse.ArgumentParser(description="tamami-remote-client (with waveform)")
     parser.add_argument(
         "--connect",
@@ -49,7 +43,21 @@ def main():
         default=64,
         help="Opus bitrate in kbps (default: 64)",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def main():
+    # Setup signal handler for graceful shutdown
+    running = True
+
+    def signal_handler(sig: int, frame: Optional[FrameType]) -> None:
+        nonlocal running
+        print("\nShutting down...")
+        running = False
+
+    signal.signal(signal.SIGINT, signal_handler)
+
+    args = build_parser().parse_args()
 
     # Streaming mode: send microphone audio to tamami server via WebRTC
     if args.connect:
